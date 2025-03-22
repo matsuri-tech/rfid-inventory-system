@@ -34,7 +34,7 @@ async def receive_large_rfid(request: Request):
 
     try:
         client = bigquery.Client()
-        table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
+        table_id = "m2m-core.zzz_logistics.t_temp_receiving_large_rfid"
         errors = client.insert_rows_json(table_id, rows)
         if errors:
             return {"error": "BigQuery insert failed", "details": errors}, 500
