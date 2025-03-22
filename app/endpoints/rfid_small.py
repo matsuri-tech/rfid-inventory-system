@@ -8,38 +8,64 @@ router = APIRouter()
 @router.post("/receiving/small-rfid")
 async def receive_small_rfid(request: Request):
     data = await request.json()
+    log_id = data.get("log_id")
 
-    warehouse_name = data.get("warehouse_name")
-    listing_id = data.get("listing_id")
-    rfid_list_str = data.get("rfid_list")
+    if not log_id:
+        return {"error": "Missing log_id"}, 400
 
-    if not warehouse_name or not listing_id or not rfid_list_str:
-        return {"error": "Missing required fields"}, 400
+    client = bigquery.Client()
 
-    # JST時刻に変換
+    # ① 一時テーブルから log_id に一致する行を取得
+    temp_table = "m2m-core.zzz_logistics.t_temp_receiving_small_rfid"
+    query = f"""
+        SELECT * FROM `{temp_table}`
+        WHERE log_id = @log_id AND processed = FALSE
+    """
+    job = client.query(query, job_config=bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("log_id", "STRING", log_id)
+        ]
+    ))
+
+    results = list(job.result())
+    if not results:
+        return {"status": "skipped", "reason": "Already processed or not found"}
+
+    row = results[0]
+    rfid_str = row["rfid_id"]
+    rfid_list = [r.strip() for r in rfid_str.split("\n") if r.strip()]
+
+    # JST timestamp
     jst_time = (datetime.utcnow() + timedelta(hours=9)).isoformat()
 
-    rfid_items = [r.strip() for r in rfid_list_str.split(",") if r.strip()]
-    rows = []
-    for rfid in rfid_items:
-        row = {
-            "log_id": str(ulid.new()),
+    # ② 新しい行を作成して本番テーブルへ INSERT
+    insert_rows = []
+    for rfid in rfid_list:
+        insert_rows.append({
+            "log_id": log_id,
             "rfid_id": rfid,
-            "warehouse_name": warehouse_name,
-            "listing_id": listing_id,
+            "warehouse_name": row["warehouse_name"],
+            "listing_id": row["listing_id"],
             "source": "AppSheet",
             "received_at": jst_time,
             "processed": False
-        }
-        rows.append(row)
+        })
 
-    try:
-        client = bigquery.Client()
-        table_id = "m2m-core.zzz_logistics.log_receiving_small_rfid"
-        errors = client.insert_rows_json(table_id, rows)
-        if errors:
-            return {"error": "BigQuery insert failed", "details": errors}, 500
-    except Exception as e:
-        return {"error": "BigQuery error", "details": str(e)}, 500
+    target_table = "m2m-core.zzz_logistics.log_receiving_small_rfid"
+    insert_errors = client.insert_rows_json(target_table, insert_rows)
+    if insert_errors:
+        return {"error": "Insert failed", "details": insert_errors}, 500
 
-    return {"status": "ok", "inserted": len(rows)}
+    # ③ processed = TRUE に更新
+    update_query = f"""
+        UPDATE `{temp_table}`
+        SET processed = TRUE
+        WHERE log_id = @log_id
+    """
+    client.query(update_query, job_config=bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("log_id", "STRING", log_id)
+        ]
+    )).result()
+
+    return {"status": "success", "inserted": len(insert_rows)}
