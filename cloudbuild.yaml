@@ -1,0 +1,10 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/m2m-core/rfid-cloud-api', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/m2m-core/rfid-cloud-api']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: ['run', 'deploy', 'rfid-cloud-api', '--image', 'gcr.io/m2m-core/rfid-cloud-api', '--platform', 'managed', '--region', 'asia-northeast1', '--allow-unauthenticated']
+images:
+  - gcr.io/m2m-core/rfid-cloud-api
