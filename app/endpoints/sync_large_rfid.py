@@ -54,7 +54,7 @@ async def sync_large_rfid(request: Request):
             "epc": row.get("epc"),
             "antNo": row.get("antNo"),
             "len": row.get("len"),
-            "processed": True
+            "processed": False
         })
 
     # Step3: 本テーブルへInsert　
