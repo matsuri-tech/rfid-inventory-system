@@ -1,14 +1,14 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request  # FastAPI の Request
 from datetime import datetime, timedelta
 import ulid
 import gspread
 from google.auth import default
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request as GoogleRequest  # ← 別名で取り込む
 
 router = APIRouter()
 
 @router.post("/receiving/large-rfid")
-async def receive_large_rfid(request: Request):
+async def receive_large_rfid(request: Request):  # FastAPIのリクエスト型
     data = await request.json()
 
     commandCode = data.get("commandCode")
@@ -21,9 +21,8 @@ async def receive_large_rfid(request: Request):
 
     timestamp = (datetime.utcnow() + timedelta(hours=9)).isoformat()
 
-    # Cloud Run用の認証
     creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    creds.refresh(Request())
+    creds.refresh(GoogleRequest())  # ← Googleのリクエスト型
     client = gspread.authorize(creds)
 
     spreadsheet_id = "1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U"
