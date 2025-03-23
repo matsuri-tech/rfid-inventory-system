@@ -5,3 +5,5 @@ ulid-py
 google-cloud-storage
 requests
 google-auth
+gspread
+oauth2client
