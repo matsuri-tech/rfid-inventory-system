@@ -1,12 +1,12 @@
 import uvicorn
 from fastapi import FastAPI
-from app.endpoints import rfid_large, rfid_small, sync_large_rfid
+from app.endpoints import rfid_large, rfid_small, sync_large_rfid,sync_picking
 
 app = FastAPI()
 app.include_router(rfid_large.router)
 app.include_router(rfid_small.router)
 app.include_router(sync_large_rfid.router)
-
+app.include_router(sync_picking.router)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
