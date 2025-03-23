@@ -11,7 +11,7 @@ async def sync_picking(request: Request):
 
     # Step 1: 未処理データの取得
     query = """
-        SELECT * FROM `m2m-core.zzz_shipping.t_temp_picking`
+        SELECT * FROM `m2m-core.logistics.t_temp_picking`
         WHERE processed = FALSE
     """
     rows = [dict(row) for row in client.query(query)]
@@ -46,14 +46,14 @@ async def sync_picking(request: Request):
         })
 
     # Step 2: log_picking に挿入
-    table_id = "m2m-core.zzz_shipping.log_picking"
+    table_id = "m2m-core.zzz_logistics.log_picking"
     errors = client.insert_rows_json(table_id, insert_rows)
     if errors:
         return {"error": "Insert failed", "details": errors}, 500
 
     # Step 3: temp_picking.processed = TRUE
     update_temp_query = f"""
-        UPDATE `m2m-core.zzz_shipping.t_temp_picking`
+        UPDATE `m2m-core.zzz_logistics.t_temp_picking`
         SET processed = TRUE
         WHERE id IN ({','.join(temp_ids)})
     """
@@ -62,7 +62,7 @@ async def sync_picking(request: Request):
     # Step 4: t_shipping_plan 更新（picking_done = TRUE, picking_done_at を設定）
     for u in shipping_updates:
         update_plan_query = f"""
-            UPDATE `m2m-core.zzz_shipping.t_shipping_plan`
+            UPDATE `m2m-core.zzz_logistics.t_shipping_plan`
             SET picking_done = TRUE,
                 picking_done_at = TIMESTAMP("{u['work_datetime']}")
             WHERE cleaning_base_id = "{u['cleaning_base_id']}"
