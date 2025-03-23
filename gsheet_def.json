@@ -4,20 +4,21 @@
       "https://docs.google.com/spreadsheets/d/1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U/edit#gid=247535907"
     ],
     "googleSheetsOptions": {
-      "skipLeadingRows": 1
+      "skipLeadingRows": 1,
+      "range": "receiving_large_rfid_temp"
     },
     "schema": {
       "fields": [
-        {"name": "id", "type": "STRING"},
-        {"name": "read_timestamp", "type": "TIMESTAMP"},
-        {"name": "hardwareKey", "type": "STRING"},
-        {"name": "epc", "type": "STRING"},
-        {"name": "commandCode", "type": "STRING"},
-        {"name": "tagRecNums", "type": "STRING"},
-        {"name": "antNo", "type": "STRING"},
-        {"name": "len", "type": "STRING"},
-        {"name": "is_sync", "type": "BOOLEAN"},
-        {"name": "processed", "type": "BOOLEAN"}
+        { "name": "id", "type": "STRING" },
+        { "name": "read_timestamp", "type": "STRING" },
+        { "name": "hardwareKey", "type": "STRING" },
+        { "name": "epc", "type": "STRING" },
+        { "name": "commandCode", "type": "STRING" },
+        { "name": "tagRecNums", "type": "STRING" },
+        { "name": "antNo", "type": "STRING" },
+        { "name": "len", "type": "STRING" },
+        { "name": "is_sync", "type": "BOOLEAN" },
+        { "name": "processed", "type": "BOOLEAN" }
       ]
     }
   }

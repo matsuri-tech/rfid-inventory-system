@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Request
 from google.cloud import bigquery
-from google.auth import default
-from google.auth.transport.requests import Request as GoogleRequest
-import gspread
 from datetime import datetime
-import pytz
+import gspread
+from google.auth import default
+from google.auth.transport.requests import Request as GRequest
 
 router = APIRouter()
 
@@ -16,74 +15,71 @@ async def sync_large_rfid(request: Request):
     if not hardware_key:
         return {"error": "Missing hardwareKey"}, 400
 
-    # スプレッドシート認証
+    # Google Sheetsからデータ取得
     creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
-    creds.refresh(GoogleRequest())
-    client_gs = gspread.authorize(creds)
+    creds.refresh(GRequest())
+    client_sheets = gspread.authorize(creds)
 
-    sheet = client_gs.open_by_key("1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U")
-    worksheet = sheet.worksheet("receiving_large_rfid_temp")
-    records = worksheet.get_all_records()
+    sheet = client_sheets.open_by_key("1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U").worksheet("receiving_large_rfid_temp")
+    values = sheet.get_all_values()
+    headers = values[0]
+    rows = values[1:]
 
-    # hardwareKey一致 + processed = FALSE の行のみ抽出
-    target_rows = [
-        r for r in records
-        if r.get("hardwareKey") == hardware_key and str(r.get("processed")).upper() == "FALSE"
+    # header index
+    idx = {h: i for i, h in enumerate(headers)}
+
+    # 未処理かつ対象ハードウェアキーの行を抽出
+    filtered_rows = [
+        row for row in rows
+        if row[idx["hardwareKey"]] == hardware_key and row[idx["processed"]].strip().lower() == "false"
     ]
 
-    if not target_rows:
+    if not filtered_rows:
         print("[DEBUG] No matching rows after filtering")
-        return {"status": "no unprocessed rows found"}
-
-    # UTCのタイムスタンプをBigQuery用に調整
-    for r in target_rows:
-        if isinstance(r.get("read_timestamp"), str):
-            try:
-                r["read_timestamp"] = datetime.fromisoformat(r["read_timestamp"].replace("Z", "+00:00"))
-            except:
-                r["read_timestamp"] = datetime.utcnow()
+        return {"status": "no unprocessed rows found"}, 200
 
     # BigQueryクライアント
     client_bq = bigquery.Client()
     log_table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
 
-    # すでに存在するIDの除外
-    id_list = [f'"{r["id"]}"' for r in target_rows if r.get("id")]
-    check_query = f"""
-        SELECT id FROM `{log_table_id}`
-        WHERE id IN ({','.join(id_list)})
-    """
-    existing_ids = set(row["id"] for row in client_bq.query(check_query))
+    # すでに存在するIDを確認
+    target_ids = [f'"{row[idx["id"]]}"' for row in filtered_rows if row[idx["id"]]]
+    if not target_ids:
+        return {"status": "no IDs found"}, 200
 
-    # 重複除去済みの行を整形
+    existing_ids_query = f"""
+        SELECT id FROM `{log_table_id}` WHERE id IN ({','.join(target_ids)})
+    """
+    existing_ids_result = client_bq.query(existing_ids_query).result()
+    existing_ids = set(row["id"] for row in existing_ids_result)
+
+    # 重複を除外した行だけを挿入対象に
     rows_to_insert = []
-    for r in target_rows:
-        if r["id"] in existing_ids:
+    for row in filtered_rows:
+        if row[idx["id"]] in existing_ids:
             continue
+
         rows_to_insert.append({
-            "id": r["id"],
-            "read_timestamp": r["read_timestamp"],
-            "hardwareKey": r["hardwareKey"],
-            "commandCode": r["commandCode"],
-            "tagRecNums": r["tagRecNums"],
-            "epc": r["epc"],
-            "antNo": r["antNo"],
-            "len": r["len"],
-            "processed": False  # 常にFalseで書き込み
+            "id": row[idx["id"]],
+            "read_timestamp": row[idx["read_timestamp"]],
+            "hardwareKey": row[idx["hardwareKey"]],
+            "commandCode": row[idx["commandCode"]],
+            "tagRecNums": row[idx["tagRecNums"]],
+            "epc": row[idx["epc"]],
+            "antNo": row[idx["antNo"]],
+            "len": row[idx["len"]],
+            "processed": False,
         })
 
     if not rows_to_insert:
-        print("[DEBUG] No new rows to insert")
-        return {"status": "already synced"}
+        print("[DEBUG] All rows already inserted")
+        return {"status": "no new rows"}, 200
 
-    # BigQueryにINSERT
     errors = client_bq.insert_rows_json(log_table_id, rows_to_insert, skip_invalid_rows=False)
-
     if errors:
-        print("[ERROR] Insert errors:", errors)
+        print(f"[ERROR] Insert errors: {errors}")
         return {"error": "Insert failed", "details": errors}, 500
 
     print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {log_table_id}")
     print(f"[DEBUG] Inserted rows: {rows_to_insert}")
     return {"status": "ok", "inserted": len(rows_to_insert)}
-
