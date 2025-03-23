@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Request
-from datetime import datetime
+from datetime import datetime, timezone
 from google.cloud import bigquery
 from google.auth import default
 from google.auth.transport.requests import Request as AuthRequest
 import gspread
-import pytz
 
 router = APIRouter()
 
@@ -27,14 +26,17 @@ async def sync_large_rfid(request: Request):
     sheet = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
 
     # データ取得
-    data = sheet.get_all_records()
-    if not data:
+    records = sheet.get_all_records()
+    if not records:
         return {"status": "no data in sheet"}, 200
 
-    # フィルタ: processed=FALSE & hardwareKey一致
-    filtered = [row for row in data if str(row.get("processed")).upper() != "TRUE" and row.get("hardwareKey") == hardware_key]
+    # フィルタ: processed = FALSE & hardwareKey 一致
+    filtered = [
+        row for row in records
+        if str(row.get("processed")).upper() != "TRUE" and row.get("hardwareKey") == hardware_key
+    ]
 
-    # epcごとにread_timestampが最大の行を1件だけ取得
+    # epc ごとに最新 read_timestamp の行だけを残す
     latest_by_epc = {}
     for row in filtered:
         epc = row.get("epc")
@@ -50,31 +52,32 @@ async def sync_large_rfid(request: Request):
             latest_by_epc[epc] = row
 
     if not latest_by_epc:
-        print(f"[DEBUG] Filtered row count: {len(filtered)}")
-        print(f"[DEBUG] Sample filtered rows: {filtered[:2]}")
+        print("[DEBUG] No matching rows after filtering")
         return {"status": "no valid records"}, 200
 
-    # BigQueryにINSERT
+    # BigQuery insert 用データ整形
     client = bigquery.Client()
-    log_table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
+    table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
     rows_to_insert = []
 
     for row in latest_by_epc.values():
         rows_to_insert.append({
-            "id": row["id"],
-            "read_timestamp": row["read_timestamp_obj"].isoformat(),
-            "hardwareKey": row["hardwareKey"],
-            "commandCode": row.get("commandCode"),
-            "tagRecNums": row.get("tagRecNums"),
-            "epc": row["epc"],
-            "antNo": row.get("antNo"),
-            "len": row.get("len"),
+            "id": str(row["id"]),
+            "read_timestamp": row["read_timestamp_obj"].replace(tzinfo=timezone.utc).isoformat(),  # RFC3339
+            "hardwareKey": str(row["hardwareKey"]),
+            "commandCode": str(row.get("commandCode") or ""),
+            "tagRecNums": str(row.get("tagRecNums") or ""),
+            "epc": str(row["epc"]),
+            "antNo": str(row.get("antNo") or ""),
+            "len": str(row.get("len") or ""),
             "processed": False
         })
 
-    errors = client.insert_rows_json(log_table_id, rows_to_insert)
+    # BigQuery 挿入
+    errors = client.insert_rows_json(table_id, rows_to_insert, skip_invalid_rows=False)
     if errors:
-        return {"error": "BigQuery insert failed", "details": errors}, 500
+        print(f"[ERROR] BigQuery insert failed: {errors}")
+        return {"error": "Insert failed", "details": errors}, 500
 
+    print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {table_id}")
     return {"status": "ok", "synced": len(rows_to_insert)}
-
