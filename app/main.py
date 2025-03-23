@@ -9,11 +9,6 @@ from app.endpoints import (
     update_inventory_large_receiving,
     enqueue_large_rfid,
 )
-import os
-
-if os.getenv("ENV") != "production":
-    from dotenv import load_dotenv
-    load_dotenv()
 
 app = FastAPI()
 app.include_router(rfid_large.router)
