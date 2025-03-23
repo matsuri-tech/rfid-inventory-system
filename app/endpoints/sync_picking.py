@@ -30,14 +30,13 @@ async def sync_picking(request: Request):
                 "id": str(ulid.new()),
                 "picking_qr": row["picking_qr"],
                 "rfid_id": rfid,
-                "rfid_input_list_add": row["rfid_input_list_add"],
                 "listing_name": row["listing_name"],
                 "listing_id": row["listing_id"],
                 "work_datetime": row["work_datetime"].isoformat() if isinstance(row["work_datetime"], datetime) else row["work_datetime"],
                 "created_at": row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else row["created_at"],
                 "processed": True
             })
-        # 後で temp_picking 側 processed を true にする
+        # temp_picking 側 processed を true にする
         temp_ids.append(f'"{row["id"]}"')
         # shipping_plan 側も更新対象として記録
         shipping_updates.append({
