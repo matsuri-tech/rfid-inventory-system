@@ -1,10 +1,25 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/m2m-core/rfid-cloud-api', '.']
+
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/m2m-core/rfid-cloud-api']
+
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
-    args: ['run', 'deploy', 'rfid-cloud-api', '--image', 'gcr.io/m2m-core/rfid-cloud-api', '--platform', 'managed', '--region', 'asia-northeast1', '--allow-unauthenticated']
+    args:
+      - 'run'
+      - 'deploy'
+      - 'rfid-cloud-api'
+      - '--image'
+      - 'gcr.io/m2m-core/rfid-cloud-api'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - 'asia-northeast1'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'GCP_PROJECT=m2m-core,GCP_LOCATION=asia-northeast1,TASK_QUEUE_NAME=rfid-task-queue,TARGET_URL=https://rfid-cloud-api-829912128848.asia-northeast1.run.app/sync/large-rfid'
 images:
   - gcr.io/m2m-core/rfid-cloud-api
+
