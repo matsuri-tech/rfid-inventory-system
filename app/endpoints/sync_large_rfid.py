@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Request
-from datetime import datetime, timezone
 from google.cloud import bigquery
 from google.auth import default
-from google.auth.transport.requests import Request as AuthRequest
+from google.auth.transport.requests import Request as GoogleRequest
 import gspread
+from datetime import datetime
+import pytz
 
 router = APIRouter()
 
@@ -15,73 +16,74 @@ async def sync_large_rfid(request: Request):
     if not hardware_key:
         return {"error": "Missing hardwareKey"}, 400
 
-    # Cloud Run 認証で gspread 使用
-    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    creds.refresh(AuthRequest())
-    gc = gspread.authorize(creds)
+    # スプレッドシート認証
+    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
+    creds.refresh(GoogleRequest())
+    client_gs = gspread.authorize(creds)
 
-    # スプレッドシート情報
-    SPREADSHEET_ID = "1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U"
-    SHEET_NAME = "receiving_large_rfid_temp"
-    sheet = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+    sheet = client_gs.open_by_key("1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U")
+    worksheet = sheet.worksheet("receiving_large_rfid_temp")
+    records = worksheet.get_all_records()
 
-    # データ取得
-    records = sheet.get_all_records()
-    if not records:
-        return {"status": "no data in sheet"}, 200
-
-    # フィルタ: processed = FALSE & hardwareKey 一致
-    filtered = [
-        row for row in records
-        if str(row.get("processed")).upper() != "TRUE" and row.get("hardwareKey") == hardware_key
+    # hardwareKey一致 + processed = FALSE の行のみ抽出
+    target_rows = [
+        r for r in records
+        if r.get("hardwareKey") == hardware_key and str(r.get("processed")).upper() == "FALSE"
     ]
 
-    # epc ごとに最新 read_timestamp の行だけを残す
-    latest_by_epc = {}
-    for row in filtered:
-        epc = row.get("epc")
-        ts_raw = row.get("read_timestamp")
-        if not epc or not ts_raw:
-            continue
-        try:
-            ts = datetime.strptime(ts_raw, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            continue
-        if epc not in latest_by_epc or ts > latest_by_epc[epc]["read_timestamp_obj"]:
-            row["read_timestamp_obj"] = ts
-            latest_by_epc[epc] = row
-
-    if not latest_by_epc:
+    if not target_rows:
         print("[DEBUG] No matching rows after filtering")
-        return {"status": "no valid records"}, 200
+        return {"status": "no unprocessed rows found"}
 
-    # BigQuery insert 用データ整形
-    client = bigquery.Client()
-    table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
+    # UTCのタイムスタンプをBigQuery用に調整
+    for r in target_rows:
+        if isinstance(r.get("read_timestamp"), str):
+            try:
+                r["read_timestamp"] = datetime.fromisoformat(r["read_timestamp"].replace("Z", "+00:00"))
+            except:
+                r["read_timestamp"] = datetime.utcnow()
+
+    # BigQueryクライアント
+    client_bq = bigquery.Client()
+    log_table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
+
+    # すでに存在するIDの除外
+    id_list = [f'"{r["id"]}"' for r in target_rows if r.get("id")]
+    check_query = f"""
+        SELECT id FROM `{log_table_id}`
+        WHERE id IN ({','.join(id_list)})
+    """
+    existing_ids = set(row["id"] for row in client_bq.query(check_query))
+
+    # 重複除去済みの行を整形
     rows_to_insert = []
-
-    for row in latest_by_epc.values():
+    for r in target_rows:
+        if r["id"] in existing_ids:
+            continue
         rows_to_insert.append({
-            "id": str(row["id"]),
-            "read_timestamp": row["read_timestamp_obj"].replace(tzinfo=timezone.utc).isoformat(),  # RFC3339
-            "hardwareKey": str(row["hardwareKey"]),
-            "commandCode": str(row.get("commandCode") or ""),
-            "tagRecNums": str(row.get("tagRecNums") or ""),
-            "epc": str(row["epc"]),
-            "antNo": str(row.get("antNo") or ""),
-            "len": str(row.get("len") or ""),
-            "processed": False
+            "id": r["id"],
+            "read_timestamp": r["read_timestamp"],
+            "hardwareKey": r["hardwareKey"],
+            "commandCode": r["commandCode"],
+            "tagRecNums": r["tagRecNums"],
+            "epc": r["epc"],
+            "antNo": r["antNo"],
+            "len": r["len"],
+            "processed": False  # 常にFalseで書き込み
         })
 
-    
-    log_table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
-    errors = client.insert_rows_json(log_table_id, rows_to_insert, skip_invalid_rows=False)
-    if errors:
-        print(f"[ERROR] BigQuery insert failed: {errors}")
-        return {"error": "Insert failed", "details": errors}, 500
-    else:
-        print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {log_table_id}")
-        print(f"[DEBUG] Inserted rows: {rows_to_insert}")
+    if not rows_to_insert:
+        print("[DEBUG] No new rows to insert")
+        return {"status": "already synced"}
 
-    print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {table_id}")
-    return {"status": "ok", "synced": len(rows_to_insert)}
+    # BigQueryにINSERT
+    errors = client_bq.insert_rows_json(log_table_id, rows_to_insert, skip_invalid_rows=False)
+
+    if errors:
+        print("[ERROR] Insert errors:", errors)
+        return {"error": "Insert failed", "details": errors}, 500
+
+    print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {log_table_id}")
+    print(f"[DEBUG] Inserted rows: {rows_to_insert}")
+    return {"status": "ok", "inserted": len(rows_to_insert)}
+
