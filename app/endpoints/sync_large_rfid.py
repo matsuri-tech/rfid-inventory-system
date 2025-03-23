@@ -41,9 +41,10 @@ async def sync_large_rfid(request: Request):
     # Step2: logテーブルにINSERT用データを整形
     insert_rows = []
     for row in rows:
+        read_ts = row.get("read_timestamp")
         insert_rows.append({
             "id": row.get("id"),
-            "read_timestamp": row.get("read_timestamp"),
+            "read_timestamp": read_ts.isoformat() if isinstance(read_ts, datetime) else read_ts,
             "hardwareKey": row.get("hardwareKey"),
             "commandCode": row.get("commandCode"),
             "tagRecNums": row.get("tagRecNums"),
