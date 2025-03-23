@@ -50,6 +50,8 @@ async def sync_large_rfid(request: Request):
             latest_by_epc[epc] = row
 
     if not latest_by_epc:
+        print(f"[DEBUG] Filtered row count: {len(filtered)}")
+        print(f"[DEBUG] Sample filtered rows: {filtered[:2]}")
         return {"status": "no valid records"}, 200
 
     # BigQueryにINSERT
