@@ -24,8 +24,8 @@ async def sync_picking(request: Request):
     shipping_updates = []  # plan テーブル更新用
 
     for row in rows:
-        rfid_list = [r.strip() for r in row.get("rfid_input_list_add", "").split(",") if r.strip()]
-        for rfid in rfid_list:
+        rfid_items = [r.strip() for r in row["rfid_input_list_add"].split(",") if r.strip()]
+        for rfid in rfid_items:
             insert_rows.append({
                 "id": str(ulid.new()),
                 "picking_qr": row["picking_qr"],
@@ -33,9 +33,9 @@ async def sync_picking(request: Request):
                 "rfid_input_list_add": row["rfid_input_list_add"],
                 "listing_name": row["listing_name"],
                 "listing_id": row["listing_id"],
-                "work_datetime": row["work_datetime"],
-                "created_at": datetime.utcnow().isoformat(),
-                "processed": False,
+                "work_datetime": row["work_datetime"].isoformat() if isinstance(row["work_datetime"], datetime) else row["work_datetime"],
+                "created_at": row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else row["created_at"],
+                "processed": True
             })
         # 後で temp_picking 側 processed を true にする
         temp_ids.append(f'"{row["id"]}"')
