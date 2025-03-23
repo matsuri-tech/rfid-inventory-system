@@ -34,7 +34,7 @@ async def sync_picking(request: Request):
                 "listing_id": row["listing_id"],
                 "work_datetime": row["work_datetime"].isoformat() if isinstance(row["work_datetime"], datetime) else row["work_datetime"],
                 "created_at": row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else row["created_at"],
-                "processed": True
+                "processed": False
             })
         # temp_picking 側 processed を true にする
         temp_ids.append(f'"{row["id"]}"')
