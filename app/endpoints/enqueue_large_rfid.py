@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import uuid
 import json
 import requests
+import base64
 from google.auth.transport.requests import Request as GoogleRequest
 from google.auth import default
 
@@ -37,7 +38,8 @@ async def enqueue_large_rfid(request: Request):
                 "headers": {
                     "Content-Type": "application/json"
                 },
-                "body": json.dumps(payload).encode("utf-8").decode("latin1")
+                # 修正ここ！jsonをbase64エンコード
+                "body": base64.b64encode(json.dumps(payload).encode()).decode()
             },
             "scheduleTime": schedule_time
         }
