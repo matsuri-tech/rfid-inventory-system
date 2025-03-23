@@ -1,6 +1,9 @@
 import uvicorn
 from fastapi import FastAPI
 from app.endpoints import rfid_large, rfid_small, sync_large_rfid,sync_picking,update_inventory_large_receiving
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 app.include_router(rfid_large.router)
