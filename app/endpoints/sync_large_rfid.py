@@ -73,11 +73,13 @@ async def sync_large_rfid(request: Request):
             "processed": False
         })
 
-    # BigQuery 挿入
-    errors = client.insert_rows_json(table_id, rows_to_insert, skip_invalid_rows=False)
+    errors = client.insert_rows_json(log_table_id, rows_to_insert, skip_invalid_rows=False)
     if errors:
         print(f"[ERROR] BigQuery insert failed: {errors}")
         return {"error": "Insert failed", "details": errors}, 500
+    else:
+        print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {log_table_id}")
+        print(f"[DEBUG] Inserted rows: {rows_to_insert}")
 
     print(f"[SUCCESS] Inserted {len(rows_to_insert)} rows to {table_id}")
     return {"status": "ok", "synced": len(rows_to_insert)}
