@@ -73,6 +73,8 @@ async def sync_large_rfid(request: Request):
             "processed": False
         })
 
+    
+    log_table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
     errors = client.insert_rows_json(log_table_id, rows_to_insert, skip_invalid_rows=False)
     if errors:
         print(f"[ERROR] BigQuery insert failed: {errors}")
