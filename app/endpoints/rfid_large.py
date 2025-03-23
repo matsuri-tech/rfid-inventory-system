@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Request
-from google.cloud import bigquery
 from datetime import datetime, timedelta
 import ulid
+import gspread
+from google.auth import default
+from google.auth.transport.requests import Request
 
 router = APIRouter()
 
@@ -18,27 +20,30 @@ async def receive_large_rfid(request: Request):
         return {"error": "Missing required fields"}, 400
 
     timestamp = (datetime.utcnow() + timedelta(hours=9)).isoformat()
-    rows = []
+
+    # Cloud Run用の認証
+    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    creds.refresh(Request())
+    client = gspread.authorize(creds)
+
+    spreadsheet_id = "1EKRhJc5HlNulOIvg33OGrcrFAPuW6Cz_4nuZyoqsD3U"
+    sheet_name = "receiving_large_rfid_temp"
+    sh = client.open_by_key(spreadsheet_id)
+    ws = sh.worksheet(sheet_name)
+
     for record in tagRecords:
-        row = {
-            "id": str(ulid.new()),
-            "read_timestamp": timestamp,
-            "hardwareKey": hardwareKey,
-            "commandCode": commandCode,
-            "tagRecNums": tagRecNums,
-            "epc": record.get("Epc"),
-            "antNo": record.get("antNo"),
-            "len": record.get("Len")
-        }
-        rows.append(row)
+        row = [
+            str(ulid.new()),
+            timestamp,
+            hardwareKey,
+            record.get("Epc"),
+            commandCode,
+            tagRecNums,
+            record.get("antNo"),
+            record.get("Len"),
+            "FALSE",
+            "FALSE"
+        ]
+        ws.append_row(row, value_input_option="USER_ENTERED")
 
-    try:
-        client = bigquery.Client()
-        table_id = "m2m-core.zzz_logistics.t_temp_receiving_large_rfid"
-        errors = client.insert_rows_json(table_id, rows)
-        if errors:
-            return {"error": "BigQuery insert failed", "details": errors}, 500
-    except Exception as e:
-        return {"error": "BigQuery error", "details": str(e)}, 500
-
-    return {"status": "ok", "inserted": len(rows)}
+    return {"status": "ok", "inserted": len(tagRecords)}
