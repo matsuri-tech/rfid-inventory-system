@@ -11,7 +11,7 @@ async def sync_picking(request: Request):
 
     # Step 1: 未処理データの取得
     query = """
-        SELECT * FROM `m2m-core.logistics.t_temp_picking`
+        SELECT * FROM `m2m-core.zzz_logistics.t_temp_picking`
         WHERE processed = FALSE
     """
     rows = [dict(row) for row in client.query(query)]
