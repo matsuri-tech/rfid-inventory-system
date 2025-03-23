@@ -16,8 +16,8 @@ async def sync_large_rfid(request: Request):
     client = bigquery.Client()
 
     # Step1: 対象データの抽出（UNIQUEなEPC）
-    query = f"""
-        SELECT AS STRUCT *
+    query = """
+        SELECT AS STRUCT id, read_timestamp, hardwareKey, commandCode, tagRecNums, epc, antNo, len
         FROM (
             SELECT *,
               ROW_NUMBER() OVER(PARTITION BY epc ORDER BY read_timestamp DESC) AS rn
@@ -38,6 +38,9 @@ async def sync_large_rfid(request: Request):
     if not rows:
         return {"status": "no unprocessed rows found"}, 200
 
+    print(f"[SYNC] Retrieved {len(rows)} unique rows")
+    print(f"[SYNC] First row: {rows[0]}")
+
     # Step2: logテーブルにINSERT用データを整形
     insert_rows = []
     for row in rows:
@@ -54,19 +57,28 @@ async def sync_large_rfid(request: Request):
             "processed": True
         })
 
-    # Step3: 本テーブルへInsert
+    # Step3: 本テーブルへInsert　
     log_table_id = "m2m-core.zzz_logistics.log_receiving_large_rfid"
     errors = client.insert_rows_json(log_table_id, insert_rows)
+
     if errors:
+        print(f"[SYNC] Insert errors: {errors}")
         return {"error": "Insert failed", "details": errors}, 500
 
-    # Step4: tempテーブル側のprocessedをTRUEに更新
-    ids = [f'"{row["id"]}"' for row in rows]
-    update_query = f"""
-        UPDATE `m2m-core.zzz_logistics.t_temp_receiving_large_rfid`
-        SET processed = TRUE
-        WHERE id IN ({','.join(ids)})
-    """
-    client.query(update_query).result()
+    print(f"[SYNC] Inserted {len(insert_rows)} rows to {log_table_id}")
 
-    return {"status": "ok", "synced": len(rows)}
+    # Step4: tempテーブル側のprocessedをTRUEに更新
+    ids = [f'"{row["id"]}"' for row in rows if row.get("id")]
+    if ids:
+        update_query = f"""
+            UPDATE `m2m-core.zzz_logistics.t_temp_receiving_large_rfid`
+            SET processed = TRUE
+            WHERE id IN ({','.join(ids)})
+        """
+        client.query(update_query).result()
+        print(f"[SYNC] Marked {len(ids)} rows as processed")
+    else:
+        print("[SYNC] No valid IDs found for update")
+
+    return {"status": "ok", "synced": len(insert_rows)}
+
