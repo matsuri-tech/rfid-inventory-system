@@ -80,10 +80,13 @@ async def sync_linen_stock_from_sheet(request: Request):
 
     # ✅ 縦持ち変換処理（修正バージョン）
     vertical_data = []
-    fixed_cols = 6  # transaction_id〜区分 まで
+    fixed_cols = 6  # transaction_id, 日付, ユーザー, 倉庫ID, 倉庫名, 区分
+
     for row in entry_rows:
-        base = row[:fixed_cols]  # [transaction_id, 日付, 倉庫ID, 倉庫名, 区分]
-        kubun = base[5]  # 区分
+        if len(row) < fixed_cols:
+            continue  # 行が短すぎる場合はスキップ
+
+        base = row[:fixed_cols]  # [transaction_id, 日付, ユーザー, 倉庫ID, 倉庫名, 区分]
 
         for i in range(fixed_cols, len(entry_header)):
             sku_name = entry_header[i]
@@ -92,11 +95,11 @@ async def sync_linen_stock_from_sheet(request: Request):
             except:
                 value = 0
             if value != 0:
-                vertical_data.append(base[:4] + [sku_name, value, kubun])  # 区分を最後に移動
+                vertical_data.append(base + [sku_name, value])  # 区分は既に base に含まれている
 
     # ヘッダー行の修正
     vertical_ws.clear()
-    vertical_ws.append_row(["transaction_id", "日付", "ユーザー", "倉庫ID", "倉庫名", "SKU名", "数量", "区分"])
+    vertical_ws.append_row(["transaction_id", "日付", "ユーザー", "倉庫ID", "倉庫名", "区分", "SKU名", "数量"])
     if vertical_data:
         vertical_ws.append_rows(vertical_data)
 
