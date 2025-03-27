@@ -1,9 +1,17 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/m2m-core/rfid-cloud-api', '.']
+    args: [
+      'build',
+      '-t',
+      'asia-northeast1-docker.pkg.dev/m2m-core/rfid-cloud-api/linen-api',
+      '.'
+    ]
 
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/m2m-core/rfid-cloud-api']
+    args: [
+      'push',
+      'asia-northeast1-docker.pkg.dev/m2m-core/rfid-cloud-api/linen-api'
+    ]
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
@@ -12,7 +20,7 @@ steps:
       - 'deploy'
       - 'rfid-cloud-api'
       - '--image'
-      - 'gcr.io/m2m-core/rfid-cloud-api'
+      - 'asia-northeast1-docker.pkg.dev/m2m-core/rfid-cloud-api/linen-api'
       - '--platform'
       - 'managed'
       - '--region'
@@ -20,6 +28,6 @@ steps:
       - '--allow-unauthenticated'
       - '--set-env-vars'
       - 'GCP_PROJECT=m2m-core,GCP_LOCATION=asia-northeast1,TASK_QUEUE_NAME=rfid-task-queue,TARGET_URL=https://rfid-cloud-api-829912128848.asia-northeast1.run.app/sync/large-rfid'
-images:
-  - gcr.io/m2m-core/rfid-cloud-api
 
+images:
+  - asia-northeast1-docker.pkg.dev/m2m-core/rfid-cloud-api/linen-api
