@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from google.auth import default
 from google.auth.transport.requests import Request as GRequest
+from google.cloud import bigquery
 from datetime import datetime
 import gspread
 
@@ -12,6 +13,9 @@ async def sync_linen_stock_from_sheet(request: Request):
     creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
     creds.refresh(GRequest())
     gc = gspread.authorize(creds)
+
+    # BigQuery クライアント
+    bq_client = bigquery.Client(credentials=creds, project="m2m-core")
 
     # シート取得
     ss = gc.open_by_key("1HhMIHJKBCbqkApnBk4gPZ0pkbKlRzwgee9-tr8VFlsU")
@@ -84,9 +88,9 @@ async def sync_linen_stock_from_sheet(request: Request):
 
     for row in entry_rows:
         if len(row) < fixed_cols:
-            continue  # 行が短すぎる場合はスキップ
+            continue
 
-        base = row[:fixed_cols]  # [transaction_id, 日付, ユーザー, 倉庫ID, 倉庫名, 区分]
+        base = row[:fixed_cols]  # transaction_id〜区分
 
         for i in range(fixed_cols, len(entry_header)):
             sku_name = entry_header[i]
@@ -95,13 +99,34 @@ async def sync_linen_stock_from_sheet(request: Request):
             except:
                 value = 0
             if value != 0:
-                vertical_data.append(base + [sku_name, value])  # 区分は既に base に含まれている
+                vertical_data.append(base + [sku_name, value])
 
-    # ヘッダー行の修正
+    # スプレッドシート出力（任意）
     vertical_ws.clear()
     vertical_ws.append_row(["transaction_id", "日付", "ユーザー", "倉庫ID", "倉庫名", "区分", "SKU名", "数量"])
     if vertical_data:
         vertical_ws.append_rows(vertical_data)
+
+    # ✅ BigQuery に登録
+    if vertical_data:
+        table_id = "m2m-core.zzz_logistics_line_stockhouse.linen_stock_entry_form"
+        rows_to_insert = [
+            {
+                "transaction_id": row[0],
+                "entry_date": datetime.strptime(row[1], "%Y/%m/%d %H:%M:%S"),
+                "user_email": row[2],
+                "warehouse_id": row[3],
+                "warehouse_name": row[4],
+                "category": row[5],
+                "sku_name": row[6],
+                "quantity": int(row[7])
+            }
+            for row in vertical_data
+        ]
+
+        errors = bq_client.insert_rows_json(table_id, rows_to_insert)
+        if errors:
+            return {"status": "error", "details": errors}
 
     return {
         "status": "ok",
