@@ -1,30 +1,35 @@
 from fastapi import APIRouter, Request
 from google.auth import default
 from google.auth.transport.requests import Request as GRequest
-import gspread
 from datetime import datetime
+import gspread
 
 router = APIRouter()
 
 @router.post("/sync/linen-stockhouse")
 async def sync_linen_stock_from_sheet(request: Request):
+    # 認証・スプレッドシート接続
     creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
     creds.refresh(GRequest())
     gc = gspread.authorize(creds)
 
-    ss = gc.open_by_key("1HhMIHJKBCbqkApnBk4gPZ0pkbKlRzwgee9-tr8VFlsU")  # ← スプシIDに置き換え
+    # シート取得
+    ss = gc.open_by_key("1HhMIHJKBCbqkApnBk4gPZ0pkbKlRzwgee9-tr8VFlsU")
     entry_ws = ss.worksheet("linen_stock_entry_form")
     stock_ws = ss.worksheet("t_現在の在庫数量")
+    vertical_ws = ss.worksheet("linen_stock_entry_form_vertical")
 
+    # データ取得
     entry_data = entry_ws.get_all_values()
     stock_data = stock_ws.get_all_values()
 
-    # ヘッダー処理
+    # ヘッダー
     entry_header = entry_data[0]
-    stock_header = stock_data[0]
     entry_rows = entry_data[1:]
+    stock_header = stock_data[0]
     stock_rows = stock_data[1:]
 
+    # SKUマッピング
     sku_map = {
         "BathMat": "537545",
         "BathTowel": "847415",
@@ -35,16 +40,15 @@ async def sync_linen_stock_from_sheet(request: Request):
         "pillowcase": "170662",
         "singleSheets": "738653"
     }
-
     sku_cols = {k: entry_header.index(k) for k in sku_map}
     processed_col = entry_header.index("処理済")
     today = datetime.now().strftime("%Y-%m-%d")
-
     updated_rows = 0
 
+    # ✅ 在庫更新
     for i, row in enumerate(entry_rows):
         if len(row) <= processed_col or row[processed_col].strip() == "✔️":
-            continue  # 処理済み
+            continue
 
         warehouse_id = row[3]
         kubun = row[5]
@@ -68,12 +72,34 @@ async def sync_linen_stock_from_sheet(request: Request):
                 stock_rows[match_index][4] = str(after)
                 stock_rows[match_index][5] = today
                 updated_rows += 1
-            else:
-                print(f"[WARN] 対象在庫なし: {warehouse_id}, {sku_id}")
 
-        # ✔️ チェック付ける
+        # ✔️フラグ
         entry_ws.update_cell(i + 2, processed_col + 1, "✔️")
 
-    # 更新反映
     stock_ws.update("A2", stock_rows)
-    return {"status": "ok", "updated": updated_rows}
+
+    # ✅ 縦持ち変換処理
+    vertical_data = []
+    fixed_cols = 5  # transaction_id〜区分 まで
+    for row in entry_rows:
+        base = row[:fixed_cols]
+        for i in range(fixed_cols, len(entry_header)):
+            sku_name = entry_header[i]
+            try:
+                value = int(row[i]) if row[i] else 0
+            except:
+                value = 0
+            if value != 0:
+                vertical_data.append(base + [sku_name, value])
+
+    # 出力
+    vertical_ws.clear()
+    vertical_ws.append_row(["transaction_id", "日付", "倉庫ID", "倉庫名", "区分", "SKU名", "数量"])
+    if vertical_data:
+        vertical_ws.append_rows(vertical_data)
+
+    return {
+        "status": "ok",
+        "updated_stock_rows": updated_rows,
+        "vertical_records_created": len(vertical_data)
+    }
