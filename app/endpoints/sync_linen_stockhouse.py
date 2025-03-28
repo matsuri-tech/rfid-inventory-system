@@ -20,7 +20,7 @@ async def sync_linen_stock_from_sheet(request: Request):
     # シート取得
     ss = gc.open_by_key("1HhMIHJKBCbqkApnBk4gPZ0pkbKlRzwgee9-tr8VFlsU")
     entry_ws = ss.worksheet("linen_stock_entry_form")
-    stock_ws = ss.worksheet("t_現在の在庫数量")
+    stock_ws = ss.worksheet("t_current_inventory")
     vertical_ws = ss.worksheet("linen_stock_entry_form_vertical")
 
     # データ取得
