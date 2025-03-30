@@ -27,15 +27,18 @@ def to_serializable_dict(row: dict) -> dict:
 
 @router.post("/sync/linen-stockhouse")
 async def sync_linen_stock_from_sheet(request: Request):
-    # 認証・スプレッドシート接続
-    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    # ✅ 認証（BigQuery + スプレッドシート両対応スコープを付与）
+    creds, _ = default(scopes=[
+        "https://www.googleapis.com/auth/cloud-platform",
+        "https://www.googleapis.com/auth/spreadsheets"
+    ])
     creds.refresh(GRequest())
-    gc = gspread.authorize(creds)
 
-    # BigQuery クライアント
+    # スプレッドシートとBigQueryに接続
+    gc = gspread.authorize(creds)
     bq_client = bigquery.Client(credentials=creds, project="m2m-core")
 
-    # シート取得
+    # スプレッドシート取得
     ss = gc.open_by_key("1HhMIHJKBCbqkApnBk4gPZ0pkbKlRzwgee9-tr8VFlsU")
     entry_ws = ss.worksheet("linen_stock_entry_form")
     stock_ws = ss.worksheet("t_current_inventory")
@@ -45,7 +48,6 @@ async def sync_linen_stock_from_sheet(request: Request):
     entry_data = entry_ws.get_all_values()
     stock_data = stock_ws.get_all_values()
 
-    # ヘッダー
     entry_header = entry_data[0]
     entry_rows = entry_data[1:]
     stock_header = stock_data[0]
@@ -67,7 +69,7 @@ async def sync_linen_stock_from_sheet(request: Request):
     today = datetime.now().strftime("%Y-%m-%d")
     updated_rows = 0
 
-    # ✅ 在庫更新
+    # ✅ 在庫更新処理
     for i, row in enumerate(entry_rows):
         if len(row) <= processed_col or row[processed_col].strip() == "✔️":
             continue
@@ -95,12 +97,12 @@ async def sync_linen_stock_from_sheet(request: Request):
                 stock_rows[match_index][5] = today
                 updated_rows += 1
 
-        # ✔️フラグ
+        # ✔️ 処理済フラグ
         entry_ws.update_cell(i + 2, processed_col + 1, "✔️")
 
     stock_ws.update("A2", stock_rows)
 
-    # ✅ 縦持ち変換処理（修正バージョン）
+    # ✅ 縦持ちデータ生成
     vertical_data = []
     fixed_cols = 6  # transaction_id, 日付, ユーザー, 倉庫ID, 倉庫名, 区分
 
@@ -108,7 +110,7 @@ async def sync_linen_stock_from_sheet(request: Request):
         if len(row) < fixed_cols:
             continue
 
-        base = row[:fixed_cols]  # transaction_id〜区分
+        base = row[:fixed_cols]
 
         for i in range(fixed_cols, len(entry_header)):
             sku_name = entry_header[i]
@@ -119,13 +121,13 @@ async def sync_linen_stock_from_sheet(request: Request):
             if value != 0:
                 vertical_data.append(base + [sku_name, value])
 
-    # スプレッドシート出力
+    # ✅ 縦持ち出力
     vertical_ws.clear()
     vertical_ws.append_row(["transaction_id", "日付", "ユーザー", "倉庫ID", "倉庫名", "区分", "SKU名", "数量"])
     if vertical_data:
         vertical_ws.append_rows(vertical_data)
 
-    # ✅ BigQuery に登録
+    # ✅ BigQueryにINSERT
     if vertical_data:
         table_id = "m2m-core.zzz_logistics_line_stockhouse.linen_stock_entry_form"
         rows_to_insert = [
@@ -141,8 +143,6 @@ async def sync_linen_stock_from_sheet(request: Request):
             }
             for row in vertical_data
         ]
-
-        # ✅ datetime を文字列に変換（ISO 8601形式）
         rows_to_insert_serialized = [to_serializable_dict(r) for r in rows_to_insert]
 
         errors = bq_client.insert_rows_json(table_id, rows_to_insert_serialized)
