@@ -7,6 +7,15 @@ import gspread
 
 router = APIRouter()
 
+# ✅ 柔軟な日付パース関数を定義
+def parse_date_flexible(date_str: str) -> datetime:
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Unknown date format: {date_str}")
+
 @router.post("/sync/linen-stockhouse")
 async def sync_linen_stock_from_sheet(request: Request):
     # 認証・スプレッドシート接続
@@ -113,7 +122,7 @@ async def sync_linen_stock_from_sheet(request: Request):
         rows_to_insert = [
             {
                 "transaction_id": row[0],
-                "entry_date": datetime.strptime(row[1], "%Y/%m/%d %H:%M:%S"),
+                "entry_date": parse_date_flexible(row[1]),  # ← 柔軟なパース関数を使用
                 "user_email": row[2],
                 "warehouse_id": row[3],
                 "warehouse_name": row[4],
