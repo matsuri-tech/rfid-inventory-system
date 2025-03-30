@@ -136,7 +136,7 @@ async def sync_linen_stock_from_sheet(request: Request):
         query = f"""
             UPDATE `{table_id}`
             SET current_quantity = IFNULL(current_quantity, 0) + @delta_qty,
-                recorded_at = CURRENT_TIMESTAMP()
+                recorded_at = CURRENT_DATE()
             WHERE listing_id = @listing_id
               AND SKU = @sku_id
         """
