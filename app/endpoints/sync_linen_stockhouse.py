@@ -129,7 +129,7 @@ async def sync_linen_stock_from_sheet(request: Request):
 
     # ✅ BigQueryにINSERT
     if vertical_data:
-        table_id = "m2m-core.zzz_logistics_line_stockhouse.linen_stock_entry_form"
+        table_id = "m2m-core.zzz_logistics_line_stockhouse.t_current_inventory"
         rows_to_insert = [
             {
                 "transaction_id": row[0],
