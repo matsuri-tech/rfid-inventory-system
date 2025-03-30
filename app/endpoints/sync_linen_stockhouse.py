@@ -7,8 +7,7 @@ import gspread
 
 router = APIRouter()
 
-# 日付パース関数
-
+# ✅ 柔軟な日付パース関数を定義
 def parse_date_flexible(date_str: str) -> datetime:
     for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d"):
         try:
@@ -17,12 +16,13 @@ def parse_date_flexible(date_str: str) -> datetime:
             continue
     raise ValueError(f"Unknown date format: {date_str}")
 
-# JSONシリアライズ対応
+# ✅ datetimeをJSONシリアライズ可能に変換
 def to_serializable_dict(row: dict) -> dict:
     return {
         key: (
             value.isoformat() if isinstance(value, datetime) else value
-        ) for key, value in row.items()
+        )
+        for key, value in row.items()
     }
 
 @router.post("/sync/linen-stockhouse")
@@ -64,7 +64,6 @@ async def sync_linen_stock_from_sheet(request: Request):
     today = datetime.now().strftime("%Y-%m-%d")
     updated_rows = 0
 
-    # 在庫更新処理（スプレッドシート）
     for i, row in enumerate(entry_rows):
         if len(row) <= processed_col or row[processed_col].strip() == "✔️":
             continue
@@ -96,13 +95,15 @@ async def sync_linen_stock_from_sheet(request: Request):
 
     stock_ws.update("A2", stock_rows)
 
-    # 縦持ちデータ作成
     vertical_data = []
     fixed_cols = 6
+
     for row in entry_rows:
         if len(row) < fixed_cols:
             continue
+
         base = row[:fixed_cols]
+
         for i in range(fixed_cols, len(entry_header)):
             sku_name = entry_header[i]
             try:
@@ -117,49 +118,38 @@ async def sync_linen_stock_from_sheet(request: Request):
     if vertical_data:
         vertical_ws.append_rows(vertical_data)
 
-    # BigQueryに履歴登録（linen_stock_entry_form）
-    if vertical_data:
-        entry_table_id = "m2m-core.zzz_logistics_line_stockhouse.linen_stock_entry_form"
-        rows_to_insert = [
-            {
-                "transaction_id": row[0],
-                "entry_date": parse_date_flexible(row[1]),
-                "user_email": row[2],
-                "warehouse_id": row[3],
-                "warehouse_name": row[4],
-                "category": row[5],
-                "sku_name": row[6],
-                "quantity": int(row[7])
-            }
-            for row in vertical_data
-        ]
-        rows_to_insert_serialized = [to_serializable_dict(r) for r in rows_to_insert]
-        bq_client.insert_rows_json(entry_table_id, rows_to_insert_serialized)
+    # BigQuery 在庫更新処理
+    table_id = "m2m-core.zzz_logistics_line_stockhouse.t_current_inventory"
 
-    # BigQueryに在庫数量を反映（t_current_inventory）
     for row in vertical_data:
-        listing_id = row[3]  # 倉庫ID
-        sku_name = row[6]  # SKU名
+        listing_id = row[3]
+        sku_name = row[6]
+        sku_id = sku_map.get(sku_name)
         qty = int(row[7])
-        kubun = row[5]  # 区分
+        kubun = row[5]
         delta_sign = -1 if "出庫" in kubun else 1
         delta_qty = delta_sign * qty
 
-        update_query = """
-        UPDATE `m2m-core.zzz_logistics_line_stockhouse.t_current_inventory`
-        SET current_quantity = current_quantity + @delta,
-            recorded_at = CURRENT_TIMESTAMP()
-        WHERE listing_id = @listing_id AND SKU = @sku
+        if not sku_id:
+            continue
+
+        query = f"""
+            UPDATE `{table_id}`
+            SET current_quantity = IFNULL(current_quantity, 0) + @delta_qty,
+                recorded_at = CURRENT_TIMESTAMP()
+            WHERE listing_id = @listing_id
+              AND SKU = @sku_id
         """
 
         job_config = bigquery.QueryJobConfig(
             query_parameters=[
-                bigquery.ScalarQueryParameter("delta", "INT64", delta_qty),
+                bigquery.ScalarQueryParameter("delta_qty", "INT64", delta_qty),
                 bigquery.ScalarQueryParameter("listing_id", "STRING", listing_id),
-                bigquery.ScalarQueryParameter("sku", "STRING", sku_map.get(sku_name, sku_name))
+                bigquery.ScalarQueryParameter("sku_id", "STRING", sku_id),
             ]
         )
-        bq_client.query(update_query, job_config=job_config).result()
+
+        bq_client.query(query, job_config=job_config).result()
 
     return {
         "status": "ok",
