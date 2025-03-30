@@ -16,6 +16,15 @@ def parse_date_flexible(date_str: str) -> datetime:
             continue
     raise ValueError(f"Unknown date format: {date_str}")
 
+# ✅ datetimeをJSONシリアライズ可能に変換
+def to_serializable_dict(row: dict) -> dict:
+    return {
+        key: (
+            value.isoformat() if isinstance(value, datetime) else value
+        )
+        for key, value in row.items()
+    }
+
 @router.post("/sync/linen-stockhouse")
 async def sync_linen_stock_from_sheet(request: Request):
     # 認証・スプレッドシート接続
@@ -110,7 +119,7 @@ async def sync_linen_stock_from_sheet(request: Request):
             if value != 0:
                 vertical_data.append(base + [sku_name, value])
 
-    # スプレッドシート出力（任意）
+    # スプレッドシート出力
     vertical_ws.clear()
     vertical_ws.append_row(["transaction_id", "日付", "ユーザー", "倉庫ID", "倉庫名", "区分", "SKU名", "数量"])
     if vertical_data:
@@ -122,7 +131,7 @@ async def sync_linen_stock_from_sheet(request: Request):
         rows_to_insert = [
             {
                 "transaction_id": row[0],
-                "entry_date": parse_date_flexible(row[1]),  # ← 柔軟なパース関数を使用
+                "entry_date": parse_date_flexible(row[1]),
                 "user_email": row[2],
                 "warehouse_id": row[3],
                 "warehouse_name": row[4],
@@ -133,7 +142,10 @@ async def sync_linen_stock_from_sheet(request: Request):
             for row in vertical_data
         ]
 
-        errors = bq_client.insert_rows_json(table_id, rows_to_insert)
+        # ✅ datetime を文字列に変換（ISO 8601形式）
+        rows_to_insert_serialized = [to_serializable_dict(r) for r in rows_to_insert]
+
+        errors = bq_client.insert_rows_json(table_id, rows_to_insert_serialized)
         if errors:
             return {"status": "error", "details": errors}
 
