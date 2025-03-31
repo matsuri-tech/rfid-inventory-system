@@ -64,13 +64,23 @@ async def sync_linen_stock_from_sheet(request: Request):
     today = datetime.now().strftime("%Y-%m-%d")
     updated_rows = 0
 
+    # ✅ 区分による入出庫判断用セット
+    incoming_kubun = {"1_通常入庫", "2_追加発注入庫"}
+    outgoing_kubun = {"3_通常出庫", "4_横持ち出庫", "5_不具合品"}
+
     for i, row in enumerate(entry_rows):
         if len(row) <= processed_col or row[processed_col].strip() == "✔️":
             continue
 
         warehouse_id = row[3]
         kubun = row[5]
-        delta_sign = -1 if "出庫" in kubun else 1
+
+        if kubun in outgoing_kubun:
+            delta_sign = -1
+        elif kubun in incoming_kubun:
+            delta_sign = 1
+        else:
+            continue  # 不明な区分はスキップ
 
         for sku_name, col_index in sku_cols.items():
             try:
@@ -95,6 +105,7 @@ async def sync_linen_stock_from_sheet(request: Request):
 
     stock_ws.update("A2", stock_rows)
 
+    # ✅ 縦持ちデータ作成
     vertical_data = []
     fixed_cols = 6
 
@@ -103,6 +114,10 @@ async def sync_linen_stock_from_sheet(request: Request):
             continue
 
         base = row[:fixed_cols]
+        kubun = base[5]
+
+        if kubun not in incoming_kubun and kubun not in outgoing_kubun:
+            continue
 
         for i in range(fixed_cols, len(entry_header)):
             sku_name = entry_header[i]
@@ -118,16 +133,23 @@ async def sync_linen_stock_from_sheet(request: Request):
     if vertical_data:
         vertical_ws.append_rows(vertical_data)
 
-    # BigQuery 在庫更新処理
+    # ✅ BigQuery 在庫更新処理
     table_id = "m2m-core.zzz_logistics_line_stockhouse.t_current_inventory"
 
     for row in vertical_data:
         listing_id = row[3]
+        kubun = row[5]
         sku_name = row[6]
         sku_id = sku_map.get(sku_name)
         qty = int(row[7])
-        kubun = row[5]
-        delta_sign = -1 if "出庫" in kubun else 1
+
+        if kubun in outgoing_kubun:
+            delta_sign = -1
+        elif kubun in incoming_kubun:
+            delta_sign = 1
+        else:
+            continue
+
         delta_qty = delta_sign * qty
 
         if not sku_id:
