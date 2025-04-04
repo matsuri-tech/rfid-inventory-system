@@ -7,7 +7,7 @@ from google.auth.transport.requests import Request as GoogleRequest  # ← 別�
 
 router = APIRouter()
 
-@router.post("/receiving/large-rfid")
+@router.post("/receiving/large-rfid/")
 async def receive_large_rfid(request: Request):  # FastAPIのリクエスト型
     data = await request.json()
 
