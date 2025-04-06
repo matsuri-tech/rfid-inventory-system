@@ -21,7 +21,7 @@ async def update_inventory_from_picking():
     if not log_rows:
         return {"status": "skipped", "reason": "no unprocessed logs"}
 
-    # step 2: MERGE実行（サブクエリ利用でUNNEST問題回避）
+    # step 2: MERGE クエリで在庫テーブルを更新
     merge_query = f"""
         MERGE `{inventory_table}` T
         USING (
@@ -36,7 +36,7 @@ async def update_inventory_from_picking():
             T.status = 'Picking',
             T.epc = IFNULL(T.epc, S.rfid_id),
             T.hardwareKey = S.source,
-            T.read_timestamp = S.received_at,
+            T.read_timestamp = CAST(S.received_at AS STRING),  -- ★ 修正ポイント！
             T.listing_id = S.listing_id,
             T.wh_name = S.warehouse_name
     """
@@ -45,7 +45,7 @@ async def update_inventory_from_picking():
     except Exception as e:
         return {"status": "error", "stage": "merge", "message": str(e)}
 
-    # step 3: processed = TRUE に更新（IN句で直接）
+    # step 3: processed = TRUE に更新（安全なUNNEST）
     rfid_ids = [row["rfid_id"] for row in log_rows]
     if not rfid_ids:
         return {"status": "skipped", "reason": "no rfid_ids to update"}
@@ -65,3 +65,4 @@ async def update_inventory_from_picking():
         return {"status": "error", "stage": "update processed", "message": str(e)}
 
     return {"status": "success", "updated": len(rfid_ids)}
+
