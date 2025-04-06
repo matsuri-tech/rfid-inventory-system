@@ -46,3 +46,20 @@ AppSheet → Cloud Run (FastAPI) → BigQuery による RFID在庫管理シス�
 
 - `log_skipped_rfid` テーブルに記録（共通）
 - 各モジュールからの共通利用を想定（今後utilsに処理関数化予定）
+
+
+🧭 現在の進捗ポイント（保持中）：
+
+Cloud Runバッチ /batch/inventory-full-update：完成済み
+
+log_skipped_rfid：共通化・ユーティリティ化済み
+
+log_processed_status：rfid_idベース＆バッチ側で管理統一済み
+
+倉庫マスタ＋選択管理テーブル：AppSheet構築進行中
+
+AppSheetフォームでのSKU参照・内訳表示: 設計整理済み
+
+scheduler.md：更新完了
+
+次の作業候補：AppSheet倉庫設定画面の実装 or Cloud Logging / Slack 通知
