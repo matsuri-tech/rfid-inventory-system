@@ -1,13 +1,7 @@
 from fastapi import APIRouter
 from google.cloud import bigquery
 from datetime import datetime
-from app.utils.logging_utils import log_skipped_rows
-
-# ...
-
-if skipped_logs:
-    log_skipped_rows(skipped_logs, log_type="receiving")
-
+from app.utils.logging_utils import log_skipped_rows  # ✅ 追加
 
 router = APIRouter()
 
@@ -17,7 +11,7 @@ async def update_inventory_small():
     skipped_logs = []
 
     try:
-        # ✅ 未処理ログ取得（log_idベースで処理済み確認）
+        # ✅ 未処理ログ取得
         query = """
             SELECT *
             FROM `m2m-core.zzz_logistics.log_receiving_small_rfid` AS logs
@@ -37,23 +31,16 @@ async def update_inventory_small():
         for row in logs:
             if not row["rfid_id"] or not row["listing_id"] or not row["warehouse_name"]:
                 skipped_logs.append({
-                    "log_id": row.get("log_id"),
-                    "rfid_id": row.get("rfid_id"),
-                    "log_type": "receiving",  # ← ここで明示
+                    "log_id": row["log_id"],
+                    "rfid_id": row["rfid_id"],
                     "reason": "missing field(s)",
-                    "received_at": row.get("received_at"),
-                    "logged_at": datetime.utcnow().isoformat()
+                    "received_at": row.get("received_at")
                 })
                 continue
             valid_logs.append(row)
 
         if not valid_logs:
-            # 🚫 全件スキップ時にもログに書き出し
-            if skipped_logs:
-                client.insert_rows_json(
-                    "m2m-core.zzz_logistics.log_skipped_rfid",
-                    skipped_logs
-                )
+            log_skipped_rows(skipped_logs, log_type="receiving")  # ✅ 共通ログ出力
             return {"status": "skipped", "reason": "all invalid records", "skipped": len(skipped_logs)}
 
         # ✅ 在庫更新（MERGE）
@@ -86,7 +73,7 @@ async def update_inventory_small():
         """
         client.query(merge_query).result()
 
-        # ✅ 処理済みログ登録
+        # ✅ 処理済みログ記録
         insert_query = """
             INSERT INTO `m2m-core.zzz_logistics.log_processed_status` (log_id, rfid_id, log_type)
             SELECT log_id, rfid_id, 'receiving'
@@ -98,10 +85,10 @@ async def update_inventory_small():
         """
         client.query(insert_query).result()
 
-        # 🚫 スキップログ出力
+        # ✅ スキップログ出力
         if skipped_logs:
             log_skipped_rows(skipped_logs, log_type="receiving")
-    
+
         return {
             "status": "success",
             "updated": len(valid_logs),
