@@ -1,71 +1,93 @@
 from fastapi import APIRouter, Request
 from google.cloud import bigquery
-from datetime import datetime
+from datetime import datetime, timedelta
 import ulid
 
 router = APIRouter()
 
-@router.post("/sync/picking")
-async def sync_picking(request: Request):
+@router.post("/picking/sync-picking")
+async def sync_small_picking_rfid(request: Request):
     client = bigquery.Client()
 
-    # Step 1: 未処理データの取得
-    query = """
-        SELECT * FROM `m2m-core.zzz_logistics.t_temp_picking`
-        WHERE processed = FALSE
+    # step 1: 整形対象の取得
+    temp_table = "m2m-core.zzz_logistics_line_stockhouse.picking_logs_detail_temp"
+    query = f"""
+        SELECT *
+        FROM `{temp_table}`
+        WHERE selected_sku = 'END'
+          AND is_formatted = FALSE
+          AND is_processing = FALSE
+        LIMIT 10
     """
-    rows = [dict(row) for row in client.query(query)]
+    rows = list(client.query(query).result())
 
     if not rows:
-        return {"status": "no data"}
+        return {"status": "skipped", "reason": "no unformatted rows"}
 
-    insert_rows = []
-    temp_ids = []  # UPDATE 用
-    shipping_updates = []  # plan テーブル更新用
-
+    results = []
     for row in rows:
-        rfid_items = [r.strip() for r in row["rfid_input_list_add"].split(",") if r.strip()]
-        for rfid in rfid_items:
+        cleaning_id = row["cleaning_id"]
+        rfid_str = row["scanned_rfid_list_str"]
+        log_id = row["log_id"] or f"log_{ulid.new().str.lower()}"
+
+        if not rfid_str:
+            continue
+
+        rfid_list = [r.strip() for r in rfid_str.split(",") if r.strip()]
+
+        # step 2: JOIN (wo_cleaning_tour) で listing_id / warehouse_name を取得
+        join_query = """
+            SELECT listing_id, room_name_common_area_name AS warehouse_name
+            FROM `m2m-core.su_wo.wo_cleaning_tour`
+            WHERE cleaning_id = @cleaning_id
+            LIMIT 1
+        """
+        join_result = list(client.query(join_query, job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("cleaning_id", "STRING", cleaning_id)
+            ]
+        )).result())
+
+        if not join_result:
+            continue  # skip if no match
+
+        listing_id = join_result[0]["listing_id"]
+        warehouse_name = join_result[0]["warehouse_name"]
+
+        now_jst = (datetime.utcnow() + timedelta(hours=9)).isoformat()
+
+        insert_rows = []
+        for rfid in rfid_list:
             insert_rows.append({
-                "id": str(ulid.new()),
-                "picking_qr": row["picking_qr"],
+                "log_id": log_id,
                 "rfid_id": rfid,
-                "listing_name": row["listing_name"],
-                "listing_id": row["listing_id"],
-                "work_datetime": row["work_datetime"].isoformat() if isinstance(row["work_datetime"], datetime) else row["work_datetime"],
-                "created_at": row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else row["created_at"],
+                "warehouse_name": warehouse_name,
+                "listing_id": listing_id,
+                "source": "AppSheet",
+                "received_at": now_jst,
                 "processed": False
             })
-        # temp_picking 側 processed を true にする
-        temp_ids.append(f'"{row["id"]}"')
-        # shipping_plan 側も更新対象として記録
-        shipping_updates.append({
-            "cleaning_base_id": row["picking_qr"],
-            "work_datetime": row["work_datetime"]
-        })
 
-    # Step 2: log_picking に挿入
-    table_id = "m2m-core.zzz_logistics.log_picking"
-    errors = client.insert_rows_json(table_id, insert_rows)
-    if errors:
-        return {"error": "Insert failed", "details": errors}, 500
+        # step 3: INSERT into log_picking_rfid
+        target_table = "m2m-core.zzz_logistics.log_picking_rfid"
+        errors = client.insert_rows_json(target_table, insert_rows)
+        if errors:
+            return {"error": "insert_failed", "details": errors}, 500
 
-    # Step 3: temp_picking.processed = TRUE
-    update_temp_query = f"""
-        UPDATE `m2m-core.zzz_logistics.t_temp_picking`
-        SET processed = TRUE
-        WHERE id IN ({','.join(temp_ids)})
-    """
-    client.query(update_temp_query).result()
-
-    # Step 4: t_shipping_plan 更新（picking_done = TRUE, picking_done_at を設定）
-    for u in shipping_updates:
-        update_plan_query = f"""
-            UPDATE `m2m-core.zzz_logistics.t_shipping_plan`
-            SET picking_done = TRUE,
-                picking_done_at = TIMESTAMP("{u['work_datetime']}")
-            WHERE cleaning_base_id = "{u['cleaning_base_id']}"
+        # step 4: 更新（is_formatted, is_processing）
+        update_query = f"""
+            UPDATE `{temp_table}`
+            SET is_formatted = TRUE, is_processing = FALSE, log_id = @log_id
+            WHERE cleaning_id = @cleaning_id
         """
-        client.query(update_plan_query).result()
+        client.query(update_query, job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("log_id", "STRING", log_id),
+                bigquery.ScalarQueryParameter("cleaning_id", "STRING", cleaning_id)
+            ]
+        )).result()
 
-    return {"status": "ok", "inserted_rows": len(insert_rows)}
+        results.append({"cleaning_id": cleaning_id, "inserted": len(insert_rows)})
+
+    return {"status": "success", "results": results}
+
