@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from google.cloud import bigquery
 from datetime import datetime
-from app.utils.logging_utils import log_skipped_rows  # ✅ 追加
+from app.utils.logging_utils import log_skipped_rows  # 共通ログ関数
 
 router = APIRouter()
 
@@ -11,7 +11,7 @@ async def update_inventory_small():
     skipped_logs = []
 
     try:
-        # ✅ 未処理ログ取得
+        # ① 未処理ログ取得（log_id ベース）
         query = """
             SELECT *
             FROM `m2m-core.zzz_logistics.log_receiving_small_rfid` AS logs
@@ -29,37 +29,52 @@ async def update_inventory_small():
 
         valid_logs = []
         for row in logs:
+            # バリデーション
             if not row["rfid_id"] or not row["listing_id"] or not row["warehouse_name"]:
                 skipped_logs.append({
                     "log_id": row["log_id"],
                     "rfid_id": row["rfid_id"],
                     "reason": "missing field(s)",
-                    "received_at": row.get("received_at")
+                    "received_at": row.get("received_at"),
+                    "logged_at": datetime.utcnow().isoformat()
                 })
                 continue
             valid_logs.append(row)
 
+        # スキップログが全件の場合
         if not valid_logs:
-            log_skipped_rows(skipped_logs, log_type="receiving")  # ✅ 共通ログ出力
-            return {"status": "skipped", "reason": "all invalid records", "skipped": len(skipped_logs)}
+            log_skipped_rows(skipped_logs, log_type="receiving")
+            return {
+                "status": "skipped",
+                "reason": "all invalid records",
+                "skipped": len(skipped_logs)
+            }
 
-        # ✅ 在庫更新（MERGE）
+        # ② MERGE処理（ROW_NUMBERで1件に絞る）
         merge_query = """
             MERGE `m2m-core.zzz_logistics.t_commodity_rfid` T
             USING (
-              SELECT
-                rfid_id,
-                listing_id,
-                warehouse_name AS wh_name,
-                received_at AS read_timestamp,
-                rfid_id AS epc,
-                'AppSheet' AS hardwareKey,
-                'receiving' AS status
-              FROM `m2m-core.zzz_logistics.log_receiving_small_rfid`
-              WHERE processed = FALSE
-                AND rfid_id IS NOT NULL
-                AND listing_id IS NOT NULL
-                AND warehouse_name IS NOT NULL
+              SELECT *
+              FROM (
+                SELECT
+                  rfid_id,
+                  listing_id,
+                  warehouse_name AS wh_name,
+                  received_at AS read_timestamp,
+                  rfid_id AS epc,
+                  'AppSheet' AS hardwareKey,
+                  'receiving' AS status,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY rfid_id
+                    ORDER BY received_at DESC, CURRENT_TIMESTAMP() DESC
+                  ) AS rn
+                FROM `m2m-core.zzz_logistics.log_receiving_small_rfid`
+                WHERE processed = FALSE
+                  AND rfid_id IS NOT NULL
+                  AND listing_id IS NOT NULL
+                  AND warehouse_name IS NOT NULL
+              )
+              WHERE rn = 1
             ) S
             ON T.rfid_id = S.rfid_id
             WHEN MATCHED THEN
@@ -73,7 +88,7 @@ async def update_inventory_small():
         """
         client.query(merge_query).result()
 
-        # ✅ 処理済みログ記録
+        # ③ log_processed_status に登録
         insert_query = """
             INSERT INTO `m2m-core.zzz_logistics.log_processed_status` (log_id, rfid_id, log_type)
             SELECT log_id, rfid_id, 'receiving'
@@ -85,7 +100,7 @@ async def update_inventory_small():
         """
         client.query(insert_query).result()
 
-        # ✅ スキップログ出力
+        # ④ スキップログ出力（有効な行があった場合でも残りを記録）
         if skipped_logs:
             log_skipped_rows(skipped_logs, log_type="receiving")
 
@@ -96,4 +111,8 @@ async def update_inventory_small():
         }
 
     except Exception as e:
-        return {"status": "error", "stage": "inventory_update", "message": str(e)}, 500
+        return {
+            "status": "error",
+            "stage": "inventory_update",
+            "message": str(e)
+        }, 500

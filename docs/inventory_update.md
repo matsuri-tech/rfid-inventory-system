@@ -81,3 +81,28 @@
 すべての工程でこの関数を呼び出すことで、処理の追跡性・原因特定を一元的に管理できるようになる。
 
 ---
+
+## ⚙️ 重複ログ処理の方針（rfid_id が複数存在する場合）
+
+### 背景
+
+RFIDログテーブル（例：`log_receiving_small_rfid`）には、同一 `rfid_id` のレコードが複数登録されているケースがあります。これらがすべて未処理状態である場合、BigQuery の `MERGE` にて「1行に対して複数行がマッチする」というエラーが発生します。
+
+---
+
+### 解決策：ROW_NUMBER による 1件選定
+
+重複する `rfid_id` に対して、次のルールで1件のみを対象とします。
+
+| 優先順位 | 条件 |
+|----------|------|
+| 1 | `received_at` が最新のもの |
+| 2 | 同一 `received_at` の場合、後に挿入された行（`CURRENT_TIMESTAMP()` 降順） |
+
+以下のクエリで実現します：
+
+```sql
+ROW_NUMBER() OVER (
+  PARTITION BY rfid_id
+  ORDER BY received_at DESC, CURRENT_TIMESTAMP() DESC
+)
