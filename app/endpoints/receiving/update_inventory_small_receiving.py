@@ -1,17 +1,23 @@
 from fastapi import APIRouter
 from google.cloud import bigquery
 from datetime import datetime
+from app.utils.logging_utils import log_skipped_rows
+
+# ...
+
+if skipped_logs:
+    log_skipped_rows(skipped_logs, log_type="receiving")
+
 
 router = APIRouter()
 
 @router.post("/receiving/update-inventory-small")
 async def update_inventory_small():
     client = bigquery.Client()
-
     skipped_logs = []
 
     try:
-        # 未処理データ取得
+        # ✅ 未処理ログ取得（log_idベースで処理済み確認）
         query = """
             SELECT *
             FROM `m2m-core.zzz_logistics.log_receiving_small_rfid` AS logs
@@ -19,7 +25,7 @@ async def update_inventory_small():
               AND NOT EXISTS (
                 SELECT 1
                 FROM `m2m-core.zzz_logistics.log_processed_status` AS status
-                WHERE status.rfid_id = logs.rfid_id
+                WHERE status.log_id = logs.log_id
                   AND status.log_type = 'receiving'
               )
         """
@@ -29,23 +35,28 @@ async def update_inventory_small():
 
         valid_logs = []
         for row in logs:
-            # バリデーション: listing_id, warehouse_name, rfid_id
             if not row["rfid_id"] or not row["listing_id"] or not row["warehouse_name"]:
                 skipped_logs.append({
-                    "log_id": row["log_id"],
-                    "rfid_id": row["rfid_id"],
+                    "log_id": row.get("log_id"),
+                    "rfid_id": row.get("rfid_id"),
+                    "log_type": "receiving",  # ← ここで明示
                     "reason": "missing field(s)",
                     "received_at": row.get("received_at"),
                     "logged_at": datetime.utcnow().isoformat()
                 })
                 continue
-
             valid_logs.append(row)
 
         if not valid_logs:
+            # 🚫 全件スキップ時にもログに書き出し
+            if skipped_logs:
+                client.insert_rows_json(
+                    "m2m-core.zzz_logistics.log_skipped_rfid",
+                    skipped_logs
+                )
             return {"status": "skipped", "reason": "all invalid records", "skipped": len(skipped_logs)}
 
-        # MERGE 在庫更新
+        # ✅ 在庫更新（MERGE）
         merge_query = """
             MERGE `m2m-core.zzz_logistics.t_commodity_rfid` T
             USING (
@@ -75,25 +86,22 @@ async def update_inventory_small():
         """
         client.query(merge_query).result()
 
-        # 処理済みログ記録
-        insert_log_query = """
-            INSERT INTO `m2m-core.zzz_logistics.log_processed_status` (rfid_id, log_type)
-            SELECT rfid_id, 'receiving'
+        # ✅ 処理済みログ登録
+        insert_query = """
+            INSERT INTO `m2m-core.zzz_logistics.log_processed_status` (log_id, rfid_id, log_type)
+            SELECT log_id, rfid_id, 'receiving'
             FROM `m2m-core.zzz_logistics.log_receiving_small_rfid`
             WHERE processed = FALSE
               AND rfid_id IS NOT NULL
               AND listing_id IS NOT NULL
               AND warehouse_name IS NOT NULL
         """
-        client.query(insert_log_query).result()
+        client.query(insert_query).result()
 
-        # 🚫 スキップログも書き出す
+        # 🚫 スキップログ出力
         if skipped_logs:
-            client.insert_rows_json(
-                "m2m-core.zzz_logistics.log_skipped_receiving_small_rfid",
-                skipped_logs
-            )
-
+            log_skipped_rows(skipped_logs, log_type="receiving")
+    
         return {
             "status": "success",
             "updated": len(valid_logs),
