@@ -5,6 +5,7 @@ AppSheet → Cloud Run (FastAPI) → BigQuery による RFID在庫管理シス�
 
 ## 主な構成要素
 - **AppSheet**: 入力 UI（RFID登録・棚卸）
+- **GCE**:大型RFIDのhttp->httpsプロキシサーバー用
 - **Cloud Run + FastAPI**: 整形処理・在庫更新処理の API
 - **BigQuery**: データベース（log, inventory, マスタ類）
 - **Cloud Scheduler**: 定期実行による同期制御
@@ -19,3 +20,16 @@ AppSheet → Cloud Run (FastAPI) → BigQuery による RFID在庫管理シス�
 - Pub/Sub 非採用（在庫更新は逐次的に確実性重視）
 - Cloud Tasks や Cloud Scheduler による柔軟なキュー制御
 - BigQuery の MERGE を活用したシンプルな更新
+
+
+## サービス登録記録
+- **BigQuery**
+- スケジュールクエリ
+- ・logi_tasks_headersテーブルの更新処理
+- ・logi_リネン物流_ピッキングリスト取得更新
+- ・logi_picking_logsテーブル定期更新
+
+- **Cloud Scheduler**
+- ジョブ名
+- ・picking-sync-job      5分に1回実行
+- ・picking-update-job    5分に1回実行
