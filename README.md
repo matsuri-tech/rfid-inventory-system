@@ -26,12 +26,12 @@
 
 ```mermaid
 graph LR
-    A[AppSheet] --> B[temp テーブル in BQ]
-    B --> C[Cloud Run (整形API)]
-    C --> D[log テーブルにINSERT]
-    D --> E[Cloud Run (在庫更新API)]
-    E --> F[t_commodity_rfid 在庫テーブルに MERGE]
-    E --> G[log_processed_status に処理記録]
+  A[AppSheet] --> B[Tempテーブル in BigQuery]
+  B --> C[Cloud Run（整形API）]
+  C --> D[LogテーブルにINSERT]
+  D --> E[Cloud Run（在庫更新API）]
+  E --> F[t_commodity_rfid 在庫テーブルにMERGE]
+  E --> G[log_processed_status に処理記録]
 ```
 
 ---
