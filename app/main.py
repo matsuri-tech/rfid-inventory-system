@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from app.endpoints.picking import router as picking_router
 from app.endpoints.receiving import router as receiving_router
 from app.endpoints.stockhouse import router as stockhouse_router
+from app.endpoints.batch import router as batch_router
 
 app = FastAPI()
-
 app.include_router(picking_router)
 app.include_router(receiving_router)
 app.include_router(stockhouse_router)
+app.include_router(batch_router)
 
 if __name__ == "__main__":
     import uvicorn

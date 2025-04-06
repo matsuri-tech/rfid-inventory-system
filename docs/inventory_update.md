@@ -38,7 +38,61 @@
 3. 更新後、`log_processed_status` に `rfid_id`, `log_type`, `processed_at` を記録
 
 ---
+# 🔁 バッチ在庫更新処理仕様（inventory-full-update）
 
+## 概要
+
+Cloud Run 上の FastAPI アプリに `/batch/inventory-full-update` という専用エンドポイントを用意し、  
+Cloud Scheduler により **定期的に在庫更新処理を一括実行** するバッチ機構です。
+
+---
+
+## 🔗 エンドポイント
+
+POST /batch/inventory-full-update
+
+yaml
+コピーする
+編集する
+
+---
+
+## ✅ 処理フロー
+
+このバッチエンドポイントは、以下の 4 つのエンドポイントを **逐次実行**します：
+
+| 順序 | 処理名                       | エンドポイント                          |
+|------|------------------------------|------------------------------------------|
+| ①   | 小型RFIDログ同期             | `/receiving/sync-small-rfid`            |
+| ②   | 小型RFID在庫更新             | `/receiving/update-inventory-small`     |
+| ③   | Pickingログ同期              | `/picking/sync-picking`                 |
+| ④   | Picking在庫更新              | `/picking/update-inventory`             |
+
+---
+
+## 🧠 実装の特徴
+
+- `httpx.AsyncClient` を使用し、**逐次POSTリクエスト**を送信
+- 成功/失敗を個別にレスポンスに記録
+- レスポンス構造：
+
+```json
+{
+  "status": "completed",
+  "results": [
+    {
+      "endpoint": "/receiving/sync-small-rfid",
+      "status_code": 200,
+      "response": {...}
+    },
+    {
+      "endpoint": "/receiving/update-inventory-small",
+      "status_code": 200,
+      "response": {...}
+    },
+    ...
+  ]
+}
 ---
 
 ## 📉 スキップログ記録 (`log_skipped_rfid`)
