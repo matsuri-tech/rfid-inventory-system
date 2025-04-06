@@ -1,0 +1,25 @@
+name: 🔁 Mirror to Company Repo
+
+on:
+  push:
+    branches:
+      - main  # ← main ブランチへの push をトリガー
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔻 リポジトリをチェックアウト
+        uses: actions/checkout@v3
+
+      - name: 🔐 SSH設定（GitHub Deploy Key）
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.COMPANY_DEPLOY_KEY }}
+
+      - name: 🚀 Push to company repo
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git remote add mirror git@github.com:matsuri-tech/rfid-inventory-system.git
+          git push mirror main --force

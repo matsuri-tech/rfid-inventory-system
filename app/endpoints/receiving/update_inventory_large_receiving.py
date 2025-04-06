@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Request
 from google.cloud import bigquery
-from datetime import datetime
 
 router = APIRouter()
 
