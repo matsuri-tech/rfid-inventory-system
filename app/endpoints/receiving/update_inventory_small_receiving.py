@@ -8,8 +8,10 @@ router = APIRouter()
 async def update_inventory_small():
     client = bigquery.Client()
 
+    skipped_logs = []
+
     try:
-        # ① 未処理のレコード抽出（log_processed_statusに存在しないもの）
+        # 未処理データ取得
         query = """
             SELECT *
             FROM `m2m-core.zzz_logistics.log_receiving_small_rfid` AS logs
@@ -25,7 +27,25 @@ async def update_inventory_small():
         if not logs:
             return {"status": "skipped", "reason": "no unprocessed logs"}
 
-        # ② 在庫更新（MERGE）
+        valid_logs = []
+        for row in logs:
+            # バリデーション: listing_id, warehouse_name, rfid_id
+            if not row["rfid_id"] or not row["listing_id"] or not row["warehouse_name"]:
+                skipped_logs.append({
+                    "log_id": row["log_id"],
+                    "rfid_id": row["rfid_id"],
+                    "reason": "missing field(s)",
+                    "received_at": row.get("received_at"),
+                    "logged_at": datetime.utcnow().isoformat()
+                })
+                continue
+
+            valid_logs.append(row)
+
+        if not valid_logs:
+            return {"status": "skipped", "reason": "all invalid records", "skipped": len(skipped_logs)}
+
+        # MERGE 在庫更新
         merge_query = """
             MERGE `m2m-core.zzz_logistics.t_commodity_rfid` T
             USING (
@@ -34,11 +54,14 @@ async def update_inventory_small():
                 listing_id,
                 warehouse_name AS wh_name,
                 received_at AS read_timestamp,
-                COALESCE(rfid_id, epc) AS epc,
+                rfid_id AS epc,
                 'AppSheet' AS hardwareKey,
                 'receiving' AS status
               FROM `m2m-core.zzz_logistics.log_receiving_small_rfid`
               WHERE processed = FALSE
+                AND rfid_id IS NOT NULL
+                AND listing_id IS NOT NULL
+                AND warehouse_name IS NOT NULL
             ) S
             ON T.rfid_id = S.rfid_id
             WHEN MATCHED THEN
@@ -52,19 +75,30 @@ async def update_inventory_small():
         """
         client.query(merge_query).result()
 
-        # ③ log_processed_statusに登録
+        # 処理済みログ記録
         insert_log_query = """
             INSERT INTO `m2m-core.zzz_logistics.log_processed_status` (rfid_id, log_type)
             SELECT rfid_id, 'receiving'
             FROM `m2m-core.zzz_logistics.log_receiving_small_rfid`
             WHERE processed = FALSE
+              AND rfid_id IS NOT NULL
+              AND listing_id IS NOT NULL
+              AND warehouse_name IS NOT NULL
         """
         client.query(insert_log_query).result()
 
-        # ④ log_receiving_small_rfid.processed を TRUE に更新（※streaming bufferには注意）
-        # 今回は実行しない、別で処理記録テーブルだけ使う形に統一する設計
+        # 🚫 スキップログも書き出す
+        if skipped_logs:
+            client.insert_rows_json(
+                "m2m-core.zzz_logistics.log_skipped_receiving_small_rfid",
+                skipped_logs
+            )
 
-        return {"status": "success", "updated": len(logs)}
+        return {
+            "status": "success",
+            "updated": len(valid_logs),
+            "skipped": len(skipped_logs)
+        }
 
     except Exception as e:
         return {"status": "error", "stage": "inventory_update", "message": str(e)}, 500
