@@ -74,7 +74,7 @@ gcloud scheduler jobs create http picking-sync-job \
   --schedule "*/5 * * * *" \
   --http-method POST \
   --uri "https://rfid-cloud-api-829912128848.asia-northeast1.run.app/picking/sync-picking" \
-  --oauth-service-account-email "your-service-account@your-project.iam.gserviceaccount.com" \
+  --oauth-service-account-email "829912128848-compute@developer.gserviceaccount.com" \
   --time-zone "Asia/Tokyo"
 
 # 🌀 在庫更新
@@ -82,5 +82,5 @@ gcloud scheduler jobs create http picking-update-job \
   --schedule "*/5 * * * *" \
   --http-method POST \
   --uri "https://rfid-cloud-api-829912128848.asia-northeast1.run.app/picking/update-inventory" \
-  --oauth-service-account-email "your-service-account@your-project.iam.gserviceaccount.com" \
+  --oauth-service-account-email "829912128848-compute@developer.gserviceaccount.com" \
   --time-zone "Asia/Tokyo"

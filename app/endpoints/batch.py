@@ -10,6 +10,7 @@ async def run_inventory_update_batch():
     endpoints = [
         "/receiving/sync-small-rfid",
         "/receiving/update-inventory-small",
+        "/receiving/update-inventory-large"
         "/picking/sync-picking",
         "/picking/update-inventory"
     ]

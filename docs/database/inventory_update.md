@@ -13,6 +13,7 @@
 - ログテーブル例:
   - `log_picking_rfid`
   - `log_receiving_small_rfid`
+  - `log_receiving_large_rfid`
 - 在庫テーブル: `t_commodity_rfid`
 - 処理済み記録テーブル: `log_processed_status`
 
@@ -51,10 +52,6 @@ Cloud Scheduler により **定期的に在庫更新処理を一括実行** す�
 
 POST /batch/inventory-full-update
 
-yaml
-コピーする
-編集する
-
 ---
 
 ## ✅ 処理フロー
@@ -65,6 +62,7 @@ yaml
 |------|------------------------------|------------------------------------------|
 | ①   | 小型RFIDログ同期             | `/receiving/sync-small-rfid`            |
 | ②   | 小型RFID在庫更新             | `/receiving/update-inventory-small`     |
+| ③   | 大型RFID在庫更新             | `/receiving/update-inventory-large`     |
 | ③   | Pickingログ同期              | `/picking/sync-picking`                 |
 | ④   | Picking在庫更新              | `/picking/update-inventory`             |
 
@@ -145,7 +143,7 @@ RFIDログテーブル（例：`log_receiving_small_rfid`）には、同一 `rfi
 ---
 
 ### 解決策：ROW_NUMBER による 1件選定
-
+ 
 重複する `rfid_id` に対して、次のルールで1件のみを対象とします。
 
 | 優先順位 | 条件 |
